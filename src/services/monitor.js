@@ -43,7 +43,15 @@ export function iniciarMonitoreo(studentKey, token) {
 
   const intervalId = setInterval(() => {
     revisarAhora(studentKey, token).catch((err) => {
-      console.error(`[monitoreo] error revisando a ${studentKey}:`, err.message);
+      // 401/403 significa que la API rechazó el token: ya caducó o ya no es
+      // válido. En vez de seguir intentando para siempre, detenemos el
+      // monitoreo y dejamos un aviso explicando por qué se detuvo.
+      if (err.status === 401 || err.status === 403) {
+        detenerMonitoreo(studentKey);
+        addNotification(studentKey, "Tu sesión expiró. El monitoreo automático se detuvo — vuelve a iniciar sesión para reactivarlo.");
+      } else {
+        console.error(`[monitoreo] error revisando a ${studentKey}:`, err.message);
+      }
     });
   }, config.monitorIntervalMs);
 
