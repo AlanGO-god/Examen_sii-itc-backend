@@ -31,4 +31,8 @@ async function call(method, url, { token, data } = {}) {
 
 export const siiClient = {
   login: (email, password) => call("post", "/login", { data: { email, password } }),
+  getEstudiante: (token) => call("get", "/movil/estudiante", { token }),
+  getCalificaciones: (token) => call("get", "/movil/estudiante/calificaciones", { token }),
+  getKardex: (token) => call("get", "/movil/estudiante/kardex", { token }),
+  getHorarios: (token) => call("get", "/movil/estudiante/horarios", { token }),
 };

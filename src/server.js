@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import { config } from "./config.js";
 import { authRouter } from "./routes/auth.routes.js";
+import { estudianteRouter } from "./routes/estudiante.routes.js";
 
 const app = express();
 
@@ -13,6 +14,7 @@ app.get("/health", (_req, res) => {
 });
 
 app.use("/api", authRouter);
+app.use("/api/estudiante", estudianteRouter);
 
 app.listen(config.port, () => {
   console.log(`Backend escuchando en http://localhost:${config.port}`);
