@@ -1,0 +1,11 @@
+{
+  "name": "sii-itc-backend",
+  "version": "1.0.0",
+  "description": "Backend intermediario para el Examen 3 - Consumo de API SII ITC",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "node --watch src/server.js",
+    "start": "node src/server.js"
+  }
+}
