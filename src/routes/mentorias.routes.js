@@ -1,8 +1,9 @@
 import { Router } from "express";
-import { requireAuth } from "../middleware/auth.js";
 import { materiasElegibles } from "../services/mentorias.js";
 import { supabase } from "../services/supabaseClient.js";
 import { siiClient } from "../services/siiClient.js";
+import { addNotification } from "../db/store.js";
+import { requireAuth, requireAdmin } from "../middleware/auth.js";
 
 export const mentoriasRouter = Router();
 
@@ -164,6 +165,122 @@ mentoriasRouter.get("/sesiones/recibidas", requireAuth, async (req, res, next) =
       .from("sesiones")
       .select("*")
       .in("tutor_id", idsTutor)
+      .order("creado_en", { ascending: false });
+
+    if (error) throw error;
+    res.json({ ok: true, sesiones: data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+mentoriasRouter.patch("/sesiones/:id/estado", requireAuth, async (req, res, next) => {
+  try {
+    const { estado } = req.body;
+    if (!["aceptada", "rechazada"].includes(estado)) {
+      return res.status(400).json({ message: "Estado inválido" });
+    }
+
+    // Confirma que la sesión pertenezca a una tutoría tuya (no cualquiera
+    // puede aceptar/rechazar solicitudes ajenas)
+    const { data: sesion, error: errorSesion } = await supabase
+      .from("sesiones")
+      .select("*, tutores(student_key, nombre_materia)")
+      .eq("id", req.params.id)
+      .single();
+
+    if (errorSesion || !sesion) {
+      return res.status(404).json({ message: "Sesión no encontrada" });
+    }
+
+    if (sesion.tutores.student_key !== req.studentKey) {
+      return res.status(403).json({ message: "No puedes modificar esta sesión" });
+    }
+
+    const { data, error } = await supabase
+      .from("sesiones")
+      .update({ estado, actualizado_en: new Date().toISOString() })
+      .eq("id", req.params.id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    const mensaje =
+      estado === "aceptada"
+        ? `Tu solicitud de tutoría de ${sesion.tutores.nombre_materia} fue aceptada.`
+        : `Tu solicitud de tutoría de ${sesion.tutores.nombre_materia} fue rechazada.`;
+    addNotification(sesion.solicitante_student_key, "mentoria", mensaje);
+
+    res.json({ ok: true, sesion: data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+mentoriasRouter.post("/admin/admins", requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const { student_key, nombre } = req.body;
+    if (!student_key) {
+      return res.status(400).json({ message: "Falta student_key" });
+    }
+
+    const { data, error } = await supabase
+      .from("admins")
+      .insert({ student_key, nombre: nombre ?? null })
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === "23505") {
+        return res.status(409).json({ message: "Ya es administrador" });
+      }
+      throw error;
+    }
+
+    res.status(201).json({ ok: true, admin: data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+mentoriasRouter.get("/admin/tutores", requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const { data, error } = await supabase
+      .from("tutores")
+      .select("*")
+      .order("creado_en", { ascending: false });
+
+    if (error) throw error;
+    res.json({ ok: true, tutores: data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+mentoriasRouter.patch("/admin/tutores/:id/desactivar", requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const { data, error } = await supabase
+      .from("tutores")
+      .update({ activo: false })
+      .eq("id", req.params.id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    if (!data) return res.status(404).json({ message: "Tutor no encontrado" });
+
+    res.json({ ok: true, tutor: data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+mentoriasRouter.get("/admin/sesiones", requireAuth, requireAdmin, async (req, res, next) => {
+  try {
+    const { data, error } = await supabase
+      .from("sesiones")
+      .select("*, tutores(nombre_materia, nombre)")
       .order("creado_en", { ascending: false });
 
     if (error) throw error;

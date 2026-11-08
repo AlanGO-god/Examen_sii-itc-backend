@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { supabase } from "../services/supabaseClient.js";
 
 // Decodifica el "payload" de un JWT (la parte de en medio) sin verificar la
 // firma — no hace falta verificarla aquí, porque quien de verdad la valida
@@ -32,4 +33,21 @@ export function requireAuth(req, res, next) {
     : crypto.createHash("sha256").update(token).digest("hex");
 
   next();
+}
+
+export async function requireAdmin(req, res, next) {
+  try {
+    const { data } = await supabase
+      .from("admins")
+      .select("student_key")
+      .eq("student_key", req.studentKey)
+      .maybeSingle();
+
+    if (!data) {
+      return res.status(403).json({ message: "No tienes permisos de administrador" });
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
 }
