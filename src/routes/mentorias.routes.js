@@ -61,3 +61,24 @@ mentoriasRouter.post("/tutores", requireAuth, async (req, res, next) => {
     next(err);
   }
 });
+
+mentoriasRouter.get("/tutores", requireAuth, async (req, res, next) => {
+  try {
+    let query = supabase
+      .from("tutores")
+      .select("*")
+      .eq("activo", true)
+      .order("creado_en", { ascending: false });
+
+    if (req.query.clave_materia) {
+      query = query.eq("clave_materia", req.query.clave_materia);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    res.json({ ok: true, tutores: data });
+  } catch (err) {
+    next(err);
+  }
+});
