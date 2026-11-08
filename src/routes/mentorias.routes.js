@@ -82,3 +82,49 @@ mentoriasRouter.get("/tutores", requireAuth, async (req, res, next) => {
     next(err);
   }
 });
+
+mentoriasRouter.post("/sesiones", requireAuth, async (req, res, next) => {
+  try {
+    const { tutor_id, mensaje, disponibilidad_propuesta } = req.body;
+    if (!tutor_id || !mensaje) {
+      return res.status(400).json({ message: "Falta tutor_id o mensaje" });
+    }
+
+    // Confirma que el tutor exista y esté activo antes de crear la solicitud
+    const { data: tutor, error: errorTutor } = await supabase
+      .from("tutores")
+      .select("id, student_key, nombre_materia")
+      .eq("id", tutor_id)
+      .eq("activo", true)
+      .single();
+
+    if (errorTutor || !tutor) {
+      return res.status(404).json({ message: "Tutor no encontrado o inactivo" });
+    }
+
+    if (tutor.student_key === req.studentKey) {
+      return res.status(400).json({ message: "No puedes solicitarte una sesión a ti mismo" });
+    }
+
+    const perfil = await siiClient.getEstudiante(req.token);
+    const solicitanteNombre = perfil?.data?.persona ?? "";
+
+    const { data, error } = await supabase
+      .from("sesiones")
+      .insert({
+        tutor_id,
+        solicitante_student_key: req.studentKey,
+        solicitante_nombre: solicitanteNombre,
+        mensaje,
+        disponibilidad_propuesta: disponibilidad_propuesta ?? null,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.status(201).json({ ok: true, sesion: data });
+  } catch (err) {
+    next(err);
+  }
+});
