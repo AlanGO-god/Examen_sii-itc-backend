@@ -13,4 +13,7 @@ export const config = {
   // de tu proyecto (producción, previews de rama, o deploys individuales),
   // para no tener que editar CORS_ORIGIN cada vez que Vercel genera una nueva.
   corsVercelPattern: /^https:\/\/examen-sii-itc-frontend[a-z0-9-]*\.vercel\.app$/,
+  supabaseUrl: process.env.SUPABASE_URL,
+  supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+  tutorCalificacionMinima: Number(process.env.TUTOR_CALIFICACION_MINIMA || 80),
 };

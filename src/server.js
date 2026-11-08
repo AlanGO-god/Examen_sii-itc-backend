@@ -7,6 +7,7 @@ import { config } from "./config.js";
 import { authRouter } from "./routes/auth.routes.js";
 import { estudianteRouter } from "./routes/estudiante.routes.js";
 import { notificacionesRouter } from "./routes/notificaciones.routes.js";
+import { mentoriasRouter } from "./routes/mentorias.routes.js";
 
 const app = express();
 
@@ -50,6 +51,7 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 app.use("/api", authRouter);
 app.use("/api/estudiante", estudianteRouter);
 app.use("/api/notificaciones", notificacionesRouter);
+app.use("/api/mentorias", mentoriasRouter);
 
 app.use((err, _req, res, _next) => {
   console.error(err);
