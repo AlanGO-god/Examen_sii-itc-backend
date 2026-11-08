@@ -128,3 +128,47 @@ mentoriasRouter.post("/sesiones", requireAuth, async (req, res, next) => {
     next(err);
   }
 });
+
+// Sesiones que YO pedí, como estudiante que busca ayuda
+mentoriasRouter.get("/sesiones/enviadas", requireAuth, async (req, res, next) => {
+  try {
+    const { data, error } = await supabase
+      .from("sesiones")
+      .select("*, tutores(nombre_materia, nombre)")
+      .eq("solicitante_student_key", req.studentKey)
+      .order("creado_en", { ascending: false });
+
+    if (error) throw error;
+    res.json({ ok: true, sesiones: data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Sesiones que me pidieron a MÍ, como tutor
+mentoriasRouter.get("/sesiones/recibidas", requireAuth, async (req, res, next) => {
+  try {
+    const { data: misTutorias, error: errorTutorias } = await supabase
+      .from("tutores")
+      .select("id")
+      .eq("student_key", req.studentKey);
+
+    if (errorTutorias) throw errorTutorias;
+
+    const idsTutor = (misTutorias ?? []).map((t) => t.id);
+    if (idsTutor.length === 0) {
+      return res.json({ ok: true, sesiones: [] });
+    }
+
+    const { data, error } = await supabase
+      .from("sesiones")
+      .select("*")
+      .in("tutor_id", idsTutor)
+      .order("creado_en", { ascending: false });
+
+    if (error) throw error;
+    res.json({ ok: true, sesiones: data });
+  } catch (err) {
+    next(err);
+  }
+});
