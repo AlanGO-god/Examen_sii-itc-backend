@@ -289,3 +289,7 @@ mentoriasRouter.get("/admin/sesiones", requireAuth, requireAdmin, async (req, re
     next(err);
   }
 });
+
+mentoriasRouter.get("/admin/ping", requireAuth, requireAdmin, (req, res) => {
+  res.json({ ok: true, esAdmin: true });
+});
