@@ -1,10 +1,10 @@
 import crypto from "node:crypto";
 
-// Decodifica el "payload" de un JWT (la parte de en medio, entre los dos
-// puntos) sin verificar la firma — no necesitamos verificarla aquí, porque
-// quien de verdad valida el token es la API del SII cuando se lo reenviamos;
-// nosotros solo queremos leer el campo "sub" (el identificador del alumno).
-function decodificarPayload(token) {
+// Decodifica el "payload" de un JWT (la parte de en medio) sin verificar la
+// firma — no hace falta verificarla aquí, porque quien de verdad la valida
+// es la API del SII cuando reenviamos el token. Solo necesitamos leer "sub"
+// y "exp".
+export function decodificarPayload(token) {
   try {
     const [, payload] = token.split(".");
     const json = Buffer.from(payload, "base64url").toString("utf-8");
@@ -15,11 +15,13 @@ function decodificarPayload(token) {
 }
 
 export function requireAuth(req, res, next) {
-  const header = req.headers.authorization || "";
-  const [scheme, token] = header.split(" ");
+  // El token ya no viene en un header: ahora vive en una cookie httpOnly que
+  // el navegador adjunta solo. JavaScript del navegador no puede leerla
+  // (eso es justo lo que la protege de robo vía XSS).
+  const token = req.cookies?.sii_token;
 
-  if (scheme !== "Bearer" || !token) {
-    return res.status(401).json({ message: "Falta el token Bearer" });
+  if (!token) {
+    return res.status(401).json({ message: "No hay una sesión activa" });
   }
 
   req.token = token;
@@ -27,7 +29,7 @@ export function requireAuth(req, res, next) {
   const payload = decodificarPayload(token);
   req.studentKey = payload?.sub
     ? String(payload.sub)
-    : crypto.createHash("sha256").update(token).digest("hex"); // respaldo si el token no trae "sub"
+    : crypto.createHash("sha256").update(token).digest("hex");
 
   next();
 }
