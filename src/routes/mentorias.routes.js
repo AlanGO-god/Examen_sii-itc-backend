@@ -32,6 +32,7 @@ mentoriasRouter.post("/tutores", requireAuth, async (req, res, next) => {
     const nombre = perfil?.data?.persona ?? "";
     const numeroControl = perfil?.data?.numero_control ?? "";
     const email = perfil?.data?.email ?? "";
+    const foto = perfil?.data?.foto ?? null;
 
     const { data, error } = await supabase
       .from("tutores")
