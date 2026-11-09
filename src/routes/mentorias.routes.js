@@ -83,52 +83,6 @@ mentoriasRouter.get("/tutores", requireAuth, async (req, res, next) => {
   }
 });
 
-mentoriasRouter.post("/sesiones", requireAuth, async (req, res, next) => {
-  try {
-    const { tutor_id, mensaje, disponibilidad_propuesta } = req.body;
-    if (!tutor_id || !mensaje) {
-      return res.status(400).json({ message: "Falta tutor_id o mensaje" });
-    }
-
-    // Confirma que el tutor exista y esté activo antes de crear la solicitud
-    const { data: tutor, error: errorTutor } = await supabase
-      .from("tutores")
-      .select("id, student_key, nombre_materia")
-      .eq("id", tutor_id)
-      .eq("activo", true)
-      .single();
-
-    if (errorTutor || !tutor) {
-      return res.status(404).json({ message: "Tutor no encontrado o inactivo" });
-    }
-
-    if (tutor.student_key === req.studentKey) {
-      return res.status(400).json({ message: "No puedes solicitarte una sesión a ti mismo" });
-    }
-
-    const perfil = await siiClient.getEstudiante(req.token);
-    const solicitanteNombre = perfil?.data?.persona ?? "";
-
-    const { data, error } = await supabase
-      .from("sesiones")
-      .insert({
-        tutor_id,
-        solicitante_student_key: req.studentKey,
-        solicitante_nombre: solicitanteNombre,
-        mensaje,
-        disponibilidad_propuesta: disponibilidad_propuesta ?? null,
-      })
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    res.status(201).json({ ok: true, sesion: data });
-  } catch (err) {
-    next(err);
-  }
-});
-
 // Sesiones que YO pedí, como estudiante que busca ayuda
 mentoriasRouter.get("/sesiones/enviadas", requireAuth, async (req, res, next) => {
   try {
@@ -429,6 +383,58 @@ mentoriasRouter.delete("/horarios/:id", requireAuth, async (req, res, next) => {
     if (error) throw error;
 
     res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+mentoriasRouter.post("/sesiones", requireAuth, async (req, res, next) => {
+  try {
+    const { horario_id, mensaje } = req.body;
+    if (!horario_id || !mensaje) {
+      return res.status(400).json({ message: "Falta horario_id o mensaje" });
+    }
+
+    const { data: horario, error: errorHorario } = await supabase
+      .from("horarios_tutor")
+      .select("id, tutor_id, tutores(student_key, activo)")
+      .eq("id", horario_id)
+      .single();
+
+    if (errorHorario || !horario) {
+      return res.status(404).json({ message: "Horario no encontrado" });
+    }
+    if (!horario.tutores.activo) {
+      return res.status(404).json({ message: "Esa tutoría ya no está activa" });
+    }
+    if (horario.tutores.student_key === req.studentKey) {
+      return res.status(400).json({ message: "No puedes reservar tu propio horario" });
+    }
+
+    const perfil = await siiClient.getEstudiante(req.token);
+    const solicitanteNombre = perfil?.data?.persona ?? "";
+
+    const { data, error } = await supabase
+      .from("sesiones")
+      .insert({
+        tutor_id: horario.tutor_id,
+        horario_id,
+        solicitante_student_key: req.studentKey,
+        solicitante_nombre: solicitanteNombre,
+        mensaje,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      // 23505 = unique_violation sobre el índice parcial: alguien más ya
+      // reservó este horario justo antes que tú
+      if (error.code === "23505") {
+        return res.status(409).json({ message: "Ese horario ya fue reservado por otro estudiante" });
+      }
+      throw error;
+    }
+
+    res.status(201).json({ ok: true, sesion: data });
   } catch (err) {
     next(err);
   }
