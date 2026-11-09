@@ -17,23 +17,21 @@ mentoriasRouter.get("/materias-elegibles", requireAuth, async (req, res, next) =
 });
 mentoriasRouter.post("/tutores", requireAuth, async (req, res, next) => {
   try {
-    const { clave_materia } = req.body;
+    const { clave_materia, carrera } = req.body;
     if (!clave_materia) {
       return res.status(400).json({ message: "Falta clave_materia" });
     }
 
-    // Verifica que la materia realmente esté en su lista de elegibles
-    // (no confiamos en que el frontend mande datos correctos)
     const materias = await materiasElegibles(req.token);
     const materia = materias.find((m) => m.clave_materia === clave_materia);
     if (!materia) {
       return res.status(403).json({ message: "No calificas como tutor de esa materia" });
     }
 
-    // Trae nombre y número de control reales desde el perfil del SII
     const perfil = await siiClient.getEstudiante(req.token);
     const nombre = perfil?.data?.persona ?? "";
     const numeroControl = perfil?.data?.numero_control ?? "";
+    const email = perfil?.data?.email ?? "";
 
     const { data, error } = await supabase
       .from("tutores")
@@ -41,6 +39,8 @@ mentoriasRouter.post("/tutores", requireAuth, async (req, res, next) => {
         student_key: req.studentKey,
         nombre,
         numero_control: String(numeroControl),
+        email,
+        carrera: carrera?.trim() || null,
         clave_materia: materia.clave_materia,
         nombre_materia: materia.nombre_materia,
         calificacion_acreditada: materia.calificacion,
@@ -50,7 +50,6 @@ mentoriasRouter.post("/tutores", requireAuth, async (req, res, next) => {
       .single();
 
     if (error) {
-      // 23505 = unique_violation (ya eres tutor de esa materia)
       if (error.code === "23505") {
         return res.status(409).json({ message: "Ya te ofreciste como tutor de esa materia" });
       }
@@ -244,20 +243,6 @@ mentoriasRouter.post("/admin/admins", requireAuth, requireAdmin, async (req, res
   }
 });
 
-mentoriasRouter.get("/admin/tutores", requireAuth, requireAdmin, async (req, res, next) => {
-  try {
-    const { data, error } = await supabase
-      .from("tutores")
-      .select("*")
-      .order("creado_en", { ascending: false });
-
-    if (error) throw error;
-    res.json({ ok: true, tutores: data });
-  } catch (err) {
-    next(err);
-  }
-});
-
 mentoriasRouter.patch("/admin/tutores/:id/desactivar", requireAuth, requireAdmin, async (req, res, next) => {
   try {
     const { data, error } = await supabase
@@ -304,6 +289,146 @@ mentoriasRouter.get("/tutores/mias", requireAuth, async (req, res, next) => {
 
     if (error) throw error;
     res.json({ ok: true, tutores: data });
+  } catch (err) {
+    next(err);
+  }
+});
+mentoriasRouter.post("/tutores/:id/horarios", requireAuth, async (req, res, next) => {
+  try {
+    const { fecha, hora_inicio, hora_fin } = req.body;
+    if (!fecha || !hora_inicio || !hora_fin) {
+      return res.status(400).json({ message: "Falta fecha, hora_inicio o hora_fin" });
+    }
+
+    // Confirma que el tutor sea tuyo antes de dejarte agregar horarios
+    const { data: tutor, error: errorTutor } = await supabase
+      .from("tutores")
+      .select("id, student_key")
+      .eq("id", req.params.id)
+      .single();
+
+    if (errorTutor || !tutor) {
+      return res.status(404).json({ message: "Tutoría no encontrada" });
+    }
+    if (tutor.student_key !== req.studentKey) {
+      return res.status(403).json({ message: "No puedes agregar horarios a esta tutoría" });
+    }
+
+    const { data, error } = await supabase
+      .from("horarios_tutor")
+      .insert({ tutor_id: tutor.id, fecha, hora_inicio, hora_fin })
+      .select()
+      .single();
+
+    if (error) {
+      if (error.code === "23505") {
+        return res.status(409).json({ message: "Ya tienes un horario registrado en esa fecha y hora" });
+      }
+      if (error.code === "23514") {
+        return res.status(400).json({ message: "La hora de fin debe ser después de la hora de inicio" });
+      }
+      throw error;
+    }
+
+    res.status(201).json({ ok: true, horario: data });
+  } catch (err) {
+    next(err);
+  }
+});
+mentoriasRouter.get("/tutores/:id/horarios", requireAuth, async (req, res, next) => {
+  try {
+    const { data: horarios, error } = await supabase
+      .from("horarios_tutor")
+      .select("*")
+      .eq("tutor_id", req.params.id)
+      .order("fecha", { ascending: true })
+      .order("hora_inicio", { ascending: true });
+
+    if (error) throw error;
+
+    const { data: sesionesActivas, error: errorSesiones } = await supabase
+      .from("sesiones")
+      .select("horario_id")
+      .in("horario_id", horarios.map((h) => h.id))
+      .in("estado", ["pendiente", "aceptada"]);
+
+    if (errorSesiones) throw errorSesiones;
+
+    const idsOcupados = new Set(sesionesActivas.map((s) => s.horario_id));
+    const resultado = horarios.map((h) => ({ ...h, disponible: !idsOcupados.has(h.id) }));
+
+    res.json({ ok: true, horarios: resultado });
+  } catch (err) {
+    next(err);
+  }
+});
+
+mentoriasRouter.get("/horarios/mios", requireAuth, async (req, res, next) => {
+  try {
+    const { data: misTutorias, error: errorTutorias } = await supabase
+      .from("tutores")
+      .select("id")
+      .eq("student_key", req.studentKey);
+
+    if (errorTutorias) throw errorTutorias;
+    const idsTutor = (misTutorias ?? []).map((t) => t.id);
+    if (idsTutor.length === 0) return res.json({ ok: true, horarios: [] });
+
+    const { data: horarios, error } = await supabase
+      .from("horarios_tutor")
+      .select("*, tutores(nombre_materia)")
+      .in("tutor_id", idsTutor)
+      .order("fecha", { ascending: true });
+
+    if (error) throw error;
+
+    const { data: sesionesActivas, error: errorSesiones } = await supabase
+      .from("sesiones")
+      .select("horario_id")
+      .in("horario_id", horarios.map((h) => h.id))
+      .in("estado", ["pendiente", "aceptada"]);
+
+    if (errorSesiones) throw errorSesiones;
+
+    const idsOcupados = new Set(sesionesActivas.map((s) => s.horario_id));
+    const resultado = horarios.map((h) => ({ ...h, reservado: idsOcupados.has(h.id) }));
+
+    res.json({ ok: true, horarios: resultado });
+  } catch (err) {
+    next(err);
+  }
+});
+
+mentoriasRouter.delete("/horarios/:id", requireAuth, async (req, res, next) => {
+  try {
+    const { data: horario, error: errorHorario } = await supabase
+      .from("horarios_tutor")
+      .select("*, tutores(student_key)")
+      .eq("id", req.params.id)
+      .single();
+
+    if (errorHorario || !horario) {
+      return res.status(404).json({ message: "Horario no encontrado" });
+    }
+    if (horario.tutores.student_key !== req.studentKey) {
+      return res.status(403).json({ message: "No puedes eliminar este horario" });
+    }
+
+    const { data: sesionActiva } = await supabase
+      .from("sesiones")
+      .select("id")
+      .eq("horario_id", req.params.id)
+      .in("estado", ["pendiente", "aceptada"])
+      .maybeSingle();
+
+    if (sesionActiva) {
+      return res.status(409).json({ message: "No puedes eliminar un horario con una sesión activa" });
+    }
+
+    const { error } = await supabase.from("horarios_tutor").delete().eq("id", req.params.id);
+    if (error) throw error;
+
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }
