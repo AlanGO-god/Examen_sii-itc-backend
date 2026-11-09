@@ -293,3 +293,18 @@ mentoriasRouter.get("/admin/sesiones", requireAuth, requireAdmin, async (req, re
 mentoriasRouter.get("/admin/ping", requireAuth, requireAdmin, (req, res) => {
   res.json({ ok: true, esAdmin: true });
 });
+
+mentoriasRouter.get("/tutores/mias", requireAuth, async (req, res, next) => {
+  try {
+    const { data, error } = await supabase
+      .from("tutores")
+      .select("*")
+      .eq("student_key", req.studentKey)
+      .order("creado_en", { ascending: false });
+
+    if (error) throw error;
+    res.json({ ok: true, tutores: data });
+  } catch (err) {
+    next(err);
+  }
+});
