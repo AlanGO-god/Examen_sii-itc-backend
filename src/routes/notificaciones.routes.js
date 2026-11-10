@@ -6,11 +6,15 @@ import { revisarAhora, iniciarMonitoreo, detenerMonitoreo, estaMonitoreando } fr
 export const notificacionesRouter = Router();
 notificacionesRouter.use(requireAuth);
 
-notificacionesRouter.get("/", (req, res) => {
-  res.json({
-    monitoreando: estaMonitoreando(req.studentKey),
-    notificaciones: listNotifications(req.studentKey),
-  });
+notificacionesRouter.get("/", async (req, res, next) => {
+  try {
+    res.json({
+      monitoreando: estaMonitoreando(req.studentKey),
+      notificaciones: await listNotifications(req.studentKey),
+    });
+  } catch (err) {
+    next(err);
+  }
 });
 
 notificacionesRouter.post("/revisar", async (req, res) => {
@@ -37,7 +41,11 @@ notificacionesRouter.post("/monitoreo/detener", (req, res) => {
   res.json({ ok: true });
 });
 
-notificacionesRouter.post("/leidas", (req, res) => {
-  markAllRead(req.studentKey);
-  res.json({ ok: true });
+notificacionesRouter.post("/leidas", async (req, res, next) => {
+  try {
+    await markAllRead(req.studentKey);
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
 });
