@@ -4,9 +4,11 @@ import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import { config } from "./config.js";
+import { origenPermitido, exigirOrigen } from "./middleware/origin.js";
 import { authRouter } from "./routes/auth.routes.js";
 import { estudianteRouter } from "./routes/estudiante.routes.js";
 import { notificacionesRouter } from "./routes/notificaciones.routes.js";
+import { mentoriasRouter } from "./routes/mentorias.routes.js";
 
 const app = express();
 
@@ -22,9 +24,7 @@ app.use(
       // Una petición sin "origin" (curl, o checks internos de Render) no
       // viene de un navegador — la dejamos pasar.
       if (!origin) return callback(null, true);
-      if (config.corsOrigins.includes(origin) || config.corsVercelPattern.test(origin)) {
-        return callback(null, true);
-      }
+      if (origenPermitido(origin)) return callback(null, true);
       callback(new Error("Origen no permitido por CORS"));
     },
     credentials: true, // necesario para que el navegador mande/reciba la cookie entre dominios
@@ -32,7 +32,8 @@ app.use(
 );
 
 app.use(cookieParser());
-app.use(express.json());
+app.use(express.json({ limit: "100kb" }));
+app.use(exigirOrigen);
 
 // Límite general de peticiones a la API, defensa básica contra abuso.
 app.use(
@@ -50,11 +51,15 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 app.use("/api", authRouter);
 app.use("/api/estudiante", estudianteRouter);
 app.use("/api/notificaciones", notificacionesRouter);
+app.use("/api/mentorias", mentoriasRouter);
 
 app.use((err, _req, res, _next) => {
   console.error(err);
-  const status = err.message === "Origen no permitido por CORS" ? 403 : 500;
-  res.status(status).json({ message: err.message || "Error interno del servidor" });
+  if (err.message === "Origen no permitido por CORS") {
+    return res.status(403).json({ message: err.message });
+  }
+  // No filtramos mensajes internos (por ejemplo de Supabase) al cliente.
+  res.status(500).json({ message: "Error interno del servidor" });
 });
 
 app.listen(config.port, () => {

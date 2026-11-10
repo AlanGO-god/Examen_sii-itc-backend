@@ -1,62 +1,64 @@
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { supabase } from "../services/supabaseClient.js";
 
-// Guardamos todo en un archivo JSON plano. No usamos una base de datos de
-// verdad (como better-sqlite3) a propósito: ese paquete necesita compilar
-// un módulo nativo (make/g++), lo cual puede fallar según la máquina — para
-// el volumen de datos de este examen (snapshots + notificaciones de un
-// estudiante), un archivo JSON es más que suficiente y no depende de nada.
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataPath = path.join(__dirname, "..", "..", "data.json");
+// Snapshots y notificaciones viven en Supabase (tablas "snapshots" y
+// "notificaciones"). Antes eran un data.json en disco, que en Render se
+// borra en cada deploy/reinicio.
 
-function load() {
-  if (!fs.existsSync(dataPath)) {
-    return { snapshots: {}, notifications: [], nextId: 1 };
+export async function getSnapshot(studentKey, kind) {
+  const { data, error } = await supabase
+    .from("snapshots")
+    .select("payload")
+    .eq("student_key", studentKey)
+    .eq("kind", kind)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data?.payload ?? null;
+}
+
+export async function saveSnapshot(studentKey, kind, payload) {
+  const { error } = await supabase.from("snapshots").upsert(
+    { student_key: studentKey, kind, payload, actualizado_en: new Date().toISOString() },
+    { onConflict: "student_key,kind" }
+  );
+  if (error) throw error;
+}
+
+export async function addNotification(studentKey, message, tipo = "general") {
+  const { error } = await supabase
+    .from("notificaciones")
+    .insert({ student_key: studentKey, message, tipo });
+  if (error) throw error;
+}
+
+// Igual que addNotification, pero nunca lanza: para avisos "secundarios"
+// (por ejemplo, avisar al tutor) que no deben tumbar la operación principal.
+export async function notificarSeguro(studentKey, message, tipo = "general") {
+  try {
+    await addNotification(studentKey, message, tipo);
+  } catch (err) {
+    console.error("[notificaciones] no se pudo guardar:", err.message);
   }
-  return JSON.parse(fs.readFileSync(dataPath, "utf-8"));
 }
 
-function save(data) {
-  fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
+export async function listNotifications(studentKey) {
+  const { data, error } = await supabase
+    .from("notificaciones")
+    .select("id, message, tipo, leida, created_at")
+    .eq("student_key", studentKey)
+    .order("id", { ascending: false })
+    .limit(50);
+
+  if (error) throw error;
+  // el frontend espera el campo "read"
+  return data.map(({ leida, ...resto }) => ({ ...resto, read: leida }));
 }
 
-export function getSnapshot(studentKey, kind) {
-  const data = load();
-  return data.snapshots[studentKey]?.[kind] ?? null;
-}
-
-export function saveSnapshot(studentKey, kind, payload) {
-  const data = load();
-  if (!data.snapshots[studentKey]) data.snapshots[studentKey] = {};
-  data.snapshots[studentKey][kind] = payload;
-  save(data);
-}
-
-export function addNotification(studentKey, message) {
-  const data = load();
-  data.notifications.push({
-    id: data.nextId++,
-    student_key: studentKey,
-    message,
-    created_at: new Date().toISOString(),
-    read: false,
-  });
-  save(data);
-}
-
-export function listNotifications(studentKey) {
-  const data = load();
-  return data.notifications
-    .filter((n) => n.student_key === studentKey)
-    .sort((a, b) => b.id - a.id)
-    .slice(0, 50);
-}
-
-export function markAllRead(studentKey) {
-  const data = load();
-  for (const n of data.notifications) {
-    if (n.student_key === studentKey) n.read = true;
-  }
-  save(data);
+export async function markAllRead(studentKey) {
+  const { error } = await supabase
+    .from("notificaciones")
+    .update({ leida: true })
+    .eq("student_key", studentKey)
+    .eq("leida", false);
+  if (error) throw error;
 }

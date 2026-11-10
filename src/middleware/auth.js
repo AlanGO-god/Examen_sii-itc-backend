@@ -1,9 +1,14 @@
 import crypto from "node:crypto";
+import { supabase } from "../services/supabaseClient.js";
+import { leerSesion } from "../services/session.js";
+import { config } from "../config.js";
 
-// Decodifica el "payload" de un JWT (la parte de en medio) sin verificar la
-// firma — no hace falta verificarla aquí, porque quien de verdad la valida
-// es la API del SII cuando reenviamos el token. Solo necesitamos leer "sub"
-// y "exp".
+export const COOKIE_SESION = "sii_session";
+
+// Decodifica el "payload" de un JWT (parte de en medio) SIN verificar firma.
+// Solo se usa una vez, en el login, sobre el token que el SII acaba de
+// entregarnos por HTTPS, para leer "sub" y "exp". Nunca se usa para decidir
+// quién es el usuario en peticiones posteriores (eso lo hace leerSesion).
 export function decodificarPayload(token) {
   try {
     const [, payload] = token.split(".");
@@ -14,22 +19,45 @@ export function decodificarPayload(token) {
   }
 }
 
-export function requireAuth(req, res, next) {
-  // El token ya no viene en un header: ahora vive en una cookie httpOnly que
-  // el navegador adjunta solo. JavaScript del navegador no puede leerla
-  // (eso es justo lo que la protege de robo vía XSS).
-  const token = req.cookies?.sii_token;
+// Identificador estable del estudiante a partir del token del SII.
+export function studentKeyDeToken(token) {
+  const payload = decodificarPayload(token);
+  return payload?.sub
+    ? String(payload.sub)
+    : crypto.createHash("sha256").update(token).digest("hex");
+}
 
-  if (!token) {
+export function requireAuth(req, res, next) {
+  // La cookie es httpOnly: JavaScript del navegador no puede leerla, y solo
+  // es válida si está firmada por este backend.
+  const sesion = leerSesion(req.cookies?.[COOKIE_SESION]);
+
+  if (!sesion) {
     return res.status(401).json({ message: "No hay una sesión activa" });
   }
 
-  req.token = token;
-
-  const payload = decodificarPayload(token);
-  req.studentKey = payload?.sub
-    ? String(payload.sub)
-    : crypto.createHash("sha256").update(token).digest("hex");
-
+  req.token = sesion.t; // token del SII, para reenviarlo a su API
+  req.studentKey = sesion.sub;
+  req.sesionExpira = sesion.exp;
   next();
+}
+
+export async function requireAdmin(req, res, next) {
+  try {
+    if (config.adminStudentKeys.includes(req.studentKey)) return next();
+
+    const { data, error } = await supabase
+      .from("admins")
+      .select("student_key")
+      .eq("student_key", req.studentKey)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!data) {
+      return res.status(403).json({ message: "No tienes permisos de administrador" });
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
 }
